@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          html {
+           font-family: Arial;
+           display: inline-block;
+           margin: 0px auto;
+           text-align: center;
+          }
+          h2 { font-size: 3.0rem; }
+          p { font-size: 3.0rem; }
+          .units { font-size: 1.2rem; }
+          .dht-labels{
+            font-size: 1.5rem;
+            vertical-align:middle;
+            padding-bottom: 15px;
+          }
+        </style>
+      </head>
+<body>
+    <h2>ESP8266 DHT Server</h2>
+</body>
+<p>
+    <span class="dht-labels">Temperature</span> 
+    <span id="temperature">%TEMPERATURE%</span>
+    <sup class="units">&deg;C</sup>
+  </p>
+  <p>
+    <span class="dht-labels">Humidity</span>
+    <span id="humidity">%HUMIDITY%</span>
+    <sup class="units">%</sup>
+  </p>
+
+  <form id="form" class="temp-max-label">
+    <label for="temp_max">Température max</label>
+    <input id="temp_max" type="number" name="temp_max">
+    <button type="submit">Régler</button>
+  </div>
+</body>
+<script>
+const form = document.getElementById("form")
+
+if(!form) {
+  console.error('Formulaire introuvable')
+}else {
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const inputTemp = document.getElementById('temp_max')
+    const formData = new FormData();
+
+    formData.append('temp_max', inputTemp.value);
+    fetch('/set_temperature', {
+      method: 'POST',
+      body: formData,
+      'Content-Type': 'multipart/form-data'
+    })
+  })
+}
+setInterval(async function ( ) {
+    try {
+        const request = await fetch('/temperature')
+        const response = await request.json();
+        if(request.ok){
+            document.getElementById("temperature").innerHTML = response.temperature.current_temp + "| MAX" + response.temperature.max_temp;
+        }
+    }catch{
+        console.error('Impossible de récupérer, la température');
+    }
+}, 1000 ) ;
+</script>
+</html>

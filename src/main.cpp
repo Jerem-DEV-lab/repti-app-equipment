@@ -11,6 +11,7 @@
 #include <ESPAsyncWebServer.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
+#include <ArduinoJson.h>
 
 #define DHTPIN 5         // Broche connectée au capteur DHT
 #define DHTTYPE DHT11     // Type de capteur (DHT11 ou DHT22)
@@ -31,32 +32,38 @@ float t = 0.0;
 float h = 0.0;
 int t_max = 0;
 
+int critical_max = 200;
+
+JsonDocument terraInfo;
+
 
 const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE HTML><html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    html {
-     font-family: Arial;
-     display: inline-block;
-     margin: 0px auto;
-     text-align: center;
-    }
-    h2 { font-size: 3.0rem; }
-    p { font-size: 3.0rem; }
-    .units { font-size: 1.2rem; }
-    .dht-labels{
-      font-size: 1.5rem;
-      vertical-align:middle;
-      padding-bottom: 15px;
-    }
-  </style>
-</head>
+<!DOCTYPE html>
+<html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          html {
+           font-family: Arial;
+           display: inline-block;
+           margin: 0px auto;
+           text-align: center;
+          }
+          h2 { font-size: 3.0rem; }
+          p { font-size: 3.0rem; }
+          .units { font-size: 1.2rem; }
+          .dht-labels{
+            font-size: 1.5rem;
+            vertical-align:middle;
+            padding-bottom: 15px;
+          }
+        </style>
+      </head>
 <body>
-  <h2>ESP8266 DHT Server</h2>
-  <p>
+    <h2>ESP8266 DHT Server</h2>
+</body>
+<p>
     <span class="dht-labels">Temperature</span> 
     <span id="temperature">%TEMPERATURE%</span>
     <sup class="units">&deg;C</sup>
@@ -67,21 +74,44 @@ const char index_html[] PROGMEM = R"rawliteral(
     <sup class="units">%</sup>
   </p>
 
-  <div class="temp-max-label">
-    <label>Température max</label>
-    <input type="number" value="%T_MAX%">
+  <form id="form" class="temp-max-label">
+    <label for="temp_max">Température max</label>
+    <input id="temp_max" type="number" name="temp_max">
+    <div id="error">
+    </div>
+    <button type="submit">Régler</button>
   </div>
 </body>
 <script>
-setInterval(function ( ) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      document.getElementById("temperature").innerHTML = this.responseText;
+const form = document.getElementById("form")
+
+if(!form) {
+  console.error('Formulaire introuvable')
+}else {
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const inputTemp = document.getElementById('temp_max')
+    const formData = new FormData();
+
+    formData.append('temp_max', inputTemp.value);
+    fetch('/set_temperature', {
+      method: 'POST',
+      body: formData,
+      'Content-Type': 'multipart/form-data'
+    })
+  })
+}
+setInterval(async function ( ) {
+    try {
+        const request = await fetch('/temperature')
+        const response = await request.json();
+        if(request.ok){
+            document.getElementById("temperature").innerHTML = response.temperature.current_temp + "| MAX" + response.temperature.max_temp;
+        }
+    }catch(e){
+      document.getElementById("error").innertHTML = e.response;
+        console.error('Impossible de récupérer, la température');
     }
-  };
-  xhttp.open("GET", "/temperature", true);
-  xhttp.send();
 }, 1000 ) ;
 </script>
 </html>)rawliteral";
@@ -118,14 +148,26 @@ void setup() {
   });
 
   server.on("/temperature",HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", String(t));
+    bool currentStateRelay = analogRead(relay);
+    terraInfo["current_temp"] = t;
+    terraInfo["max_temp"] = t_max;
+    terraInfo["is_start"] = currentStateRelay;
+    Serial.println(currentStateRelay);
+    String payload;
+    serializeJson(terraInfo, payload);
+    request->send(200, "application/json", payload);
   });
 
-  server.on("/set_temperature", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/set_temperature", HTTP_POST, [](AsyncWebServerRequest *request) {
     String message;
-        if (request->hasParam(TEMP_MAX)) {
-            message = request->getParam(TEMP_MAX)->value();
-            t_max = request->getParam(TEMP_MAX)->value().toInt();
+        if (request->hasParam(TEMP_MAX, true)) {
+            message = request->getParam(TEMP_MAX, true)->value();
+
+            if(message.toInt() > critical_max){
+              request->send(401, "text/plain", "Le seuil max est de " + critical_max);
+            } else {
+              t_max = request->getParam(TEMP_MAX, true)->value().toInt();
+            }
         } else {
             message = "No temp max sent";
         }
